@@ -321,7 +321,14 @@ class CIFData(Dataset):
     def __getitem__(self, idx):
         cif_id, target = self.id_prop_data[idx]
         crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
+                                                   cif_id+'.vasp'))
+        '''
+        crystal = Structure.from_file(os.path.join(self.root_dir, cif_id+'.cif'),
+                                      site_tolerance=0.1,
+                                      frac_tolerance=0.1,
+                                      comp_tol=0.01,
+                                      check_cif=True)
+        '''
         atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
                               for i in range(len(crystal))])
         atom_fea = torch.Tensor(atom_fea)
