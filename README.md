@@ -1,5 +1,13 @@
 # Crystal Graph Convolutional Neural Networks
 
+**Note**: This version is a personal modification from the [original repo](https://github.com/txie-93/cgcnn), and there are some major changes.
+
+## Change log
+
+- Switch reading pymatgen structures from CIF to POSCAR
+- Add `shuffle` and `drop_last` in `torch.utils.data.DataLoader`
+- TBD
+
 This software package implements the Crystal Graph Convolutional Neural Networks (CGCNN) that takes an arbitary crystal structure to predict material properties. 
 
 The package provides two major functions:
@@ -90,7 +98,8 @@ To input crystal structures to CGCNN, you will need to define a customized datas
 
 Before defining a customized dataset, you will need:
 
-- [CIF](https://en.wikipedia.org/wiki/Crystallographic_Information_File) files recording the structure of the crystals that you are interested in
+- ~~[CIF](https://en.wikipedia.org/wiki/Crystallographic_Information_File) files recording the structure of the crystals that you are interested in~~
+- [POSCAR](https://www.vasp.at/wiki/index.php/POSCAR) files recording the structure of the crystals that you are interested in
 - The target properties for each crystal (not needed for predicting, but you need to put some random numbers in `id_prop.csv`)
 
 You can create a customized dataset by creating a directory `root_dir` with the following files: 
@@ -99,7 +108,9 @@ You can create a customized dataset by creating a directory `root_dir` with the 
 
 2. `atom_init.json`: a [JSON](https://en.wikipedia.org/wiki/JSON) file that stores the initialization vector for each element. An example of `atom_init.json` is `data/sample-regression/atom_init.json`, which should be good for most applications.
 
-3. `ID.cif`: a [CIF](https://en.wikipedia.org/wiki/Crystallographic_Information_File) file that recodes the crystal structure, where `ID` is the unique `ID` for the crystal.
+3 (old). ~~`ID.cif`: a [CIF](https://en.wikipedia.org/wiki/Crystallographic_Information_File) file that recodes the crystal structure, where `ID` is the unique `ID` for the crystal.~~
+
+3 (new). `ID.vasp` a [POSCAR](https://www.vasp.at/wiki/index.php/POSCAR) file that recodes the crystal structure, where `ID` is the unique `ID` for the crystal.
 
 The structure of the `root_dir` should be:
 
@@ -107,8 +118,8 @@ The structure of the `root_dir` should be:
 root_dir
 ├── id_prop.csv
 ├── atom_init.json
-├── id0.cif
-├── id1.cif
+├── id0.vasp
+├── id1.vasp
 ├── ...
 ```
 
