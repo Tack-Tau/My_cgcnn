@@ -80,14 +80,14 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               sampler=train_sampler,
                               num_workers=num_workers,
                               collate_fn=collate_fn,
-                              shuffle=True,
+                              shuffle=False,
                               drop_last=True,
                               pin_memory=pin_memory)
     val_loader = DataLoader(dataset, batch_size=batch_size,
                             sampler=val_sampler,
                             num_workers=num_workers,
                             collate_fn=collate_fn,
-                            shuffle=True,
+                            shuffle=False,
                             drop_last=True,
                             pin_memory=pin_memory)
     if return_test:
@@ -95,7 +95,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                                  sampler=test_sampler,
                                  num_workers=num_workers,
                                  collate_fn=collate_fn,
-                                 shuffle=True,
+                                 shuffle=False,
                                  drop_last=True,
                                  pin_memory=pin_memory)
     if return_test:
