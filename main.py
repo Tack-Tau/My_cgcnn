@@ -94,37 +94,22 @@ def main():
     # load data
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
-    if args.task == 'classification':
-        loss_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
-            dataset=dataset,
-            classification=True,
-            collate_fn=collate_fn,
-            batch_size=args.batch_size,
-            train_ratio=args.train_ratio,
-            num_workers=args.workers,
-            val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio,
-            pin_memory=args.cuda,
-            train_size=args.train_size,
-            val_size=args.val_size,
-            test_size=args.test_size,
-            return_test=True)
-    else:
-        train_loader, val_loader, test_loader = get_train_val_test_loader(
-            dataset=dataset,
-            classification=False,
-            collate_fn=collate_fn,
-            batch_size=args.batch_size,
-            train_ratio=args.train_ratio,
-            num_workers=args.workers,
-            val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio,
-            pin_memory=args.cuda,
-            train_size=args.train_size,
-            val_size=args.val_size,
-            test_size=args.test_size,
-            return_test=True)
-
+    
+    loss_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
+        dataset=dataset,
+        classification=True if args.task =='classification' else False,
+        collate_fn=collate_fn,
+        batch_size=args.batch_size,
+        train_ratio=args.train_ratio,
+        num_workers=args.workers,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        pin_memory=args.cuda,
+        train_size=args.train_size,
+        val_size=args.val_size,
+        test_size=args.test_size,
+        return_test=True)
+    
     # obtain target value normalizer
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))

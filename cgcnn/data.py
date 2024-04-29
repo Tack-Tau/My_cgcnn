@@ -137,9 +137,9 @@ def get_train_val_test_loader(dataset, classification=False,
             return loss_weights, train_loader, val_loader
     else:
         if return_test:
-            return train_loader, val_loader, test_loader
+            return None, train_loader, val_loader, test_loader
         else:
-            return train_loader, val_loader
+            return None, train_loader, val_loader
 
 
 def collate_pool(dataset_list):
