@@ -13,7 +13,7 @@ import torch.optim as optim
 from sklearn import metrics
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
-
+from torch.multiprocessing import set_sharing_strategy
 from cgcnn.data import CIFData
 from cgcnn.data import collate_pool, get_train_val_test_loader
 from cgcnn.model import CrystalGraphConvNet
@@ -94,19 +94,36 @@ def main():
     # load data
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
-    train_loader, val_loader, test_loader = get_train_val_test_loader(
-        dataset=dataset,
-        collate_fn=collate_fn,
-        batch_size=args.batch_size,
-        train_ratio=args.train_ratio,
-        num_workers=args.workers,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        pin_memory=args.cuda,
-        train_size=args.train_size,
-        val_size=args.val_size,
-        test_size=args.test_size,
-        return_test=True)
+    if args.task == 'classification':
+        loss_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
+            dataset=dataset,
+            classification=True,
+            collate_fn=collate_fn,
+            batch_size=args.batch_size,
+            train_ratio=args.train_ratio,
+            num_workers=args.workers,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            pin_memory=args.cuda,
+            train_size=args.train_size,
+            val_size=args.val_size,
+            test_size=args.test_size,
+            return_test=True)
+    else:
+        train_loader, val_loader, test_loader = get_train_val_test_loader(
+            dataset=dataset,
+            classification=False,
+            collate_fn=collate_fn,
+            batch_size=args.batch_size,
+            train_ratio=args.train_ratio,
+            num_workers=args.workers,
+            val_ratio=args.val_ratio,
+            test_ratio=args.test_ratio,
+            pin_memory=args.cuda,
+            train_size=args.train_size,
+            val_size=args.val_size,
+            test_size=args.test_size,
+            return_test=True)
 
     # obtain target value normalizer
     if args.task == 'classification':
@@ -139,9 +156,9 @@ def main():
 
     # define loss func and optimizer
     if args.task == 'classification':
-        criterion = nn.NLLLoss()
+        criterion = nn.NLLLoss(weight=loss_weights, reduction='mean')
     else:
-        criterion = nn.MSELoss()
+        criterion = nn.MSELoss(reduction='mean')
     if args.optim == 'SGD':
         optimizer = optim.SGD(model.parameters(), args.lr,
                               momentum=args.momentum,
@@ -468,7 +485,7 @@ def class_eval(prediction, target):
         target_label = np.asarray([target_label])
     if prediction.shape[1] == 2:
         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary')
+            target_label, pred_label, average='binary', zero_division=np.nan)
         auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
         accuracy = metrics.accuracy_score(target_label, pred_label)
     else:
@@ -510,4 +527,5 @@ def adjust_learning_rate(optimizer, epoch, k):
 
 
 if __name__ == '__main__':
+    set_sharing_strategy('file_system')
     main()

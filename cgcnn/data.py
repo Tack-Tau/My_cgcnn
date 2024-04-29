@@ -12,13 +12,19 @@ import torch
 from pymatgen.core.structure import Structure
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
-from torch.utils.data.sampler import SubsetRandomSampler
+from torch.utils.data.sampler import SubsetRandomSampler, WeightedRandomSampler
+from torch.multiprocessing import get_context
+from sklearn.utils.class_weight import compute_class_weight
 
-
-def get_train_val_test_loader(dataset, collate_fn=default_collate,
+def get_train_val_test_loader(dataset, classification=False,
+                              collate_fn=default_collate,
                               batch_size=64, train_ratio=None,
-                              val_ratio=0.1, test_ratio=0.1, return_test=False,
-                              num_workers=1, pin_memory=False, **kwargs):
+                              val_ratio=0.1, test_ratio=0.1,
+                              return_test=False, num_workers=1,
+                              pin_memory=False, persistent_workers=False,
+                              multiprocessing_context=get_context('fork'),
+                              shuffle=False, drop_last=True,
+                              **kwargs):
     """
     Utility function for dividing a dataset to train, val, test datasets.
 
@@ -28,6 +34,7 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     ----------
     dataset: torch.utils.data.Dataset
       The full dataset to be divided.
+    classification: bool
     collate_fn: torch.utils.data.DataLoader
     batch_size: int
     train_ratio: float
@@ -71,7 +78,26 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
         valid_size = kwargs['val_size']
     else:
         valid_size = int(val_ratio * total_size)
-    train_sampler = SubsetRandomSampler(indices[:train_size])
+    if classification:
+        train_indices = indices[:train_size]
+        train_targets = [np.array(dataset[i][1].numpy(),
+                                  dtype=np.int32).item() for i in train_indices]
+        class_weights = compute_class_weight(
+            class_weight = 'balanced',
+            classes = np.unique(train_targets),
+            y = train_targets)
+        class_weights = class_weights/np.linalg.norm(class_weights)
+        loss_weights = torch.tensor(class_weights, dtype=torch.float32)
+        class_weights_dict = {class_idx: weight for class_idx,
+                              weight in zip(np.unique(train_targets), class_weights)}
+        class_weights_tensor = torch.tensor([class_weights_dict[class_idx]
+                                             for class_idx in train_targets], dtype=torch.float32)
+        train_sampler = WeightedRandomSampler(
+            weights = class_weights_tensor[train_indices],
+            num_samples = train_size,
+            replacement = False)
+    else:
+        train_sampler = SubsetRandomSampler(indices[:train_size])
     val_sampler = SubsetRandomSampler(
         indices[-(valid_size + test_size):-test_size])
     if return_test:
@@ -80,28 +106,40 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
                               sampler=train_sampler,
                               num_workers=num_workers,
                               collate_fn=collate_fn,
-                              shuffle=False,
-                              drop_last=True,
+                              shuffle=shuffle,
+                              drop_last=drop_last,
+                              persistent_workers=persistent_workers,
+                              multiprocessing_context=multiprocessing_context,
                               pin_memory=pin_memory)
     val_loader = DataLoader(dataset, batch_size=batch_size,
                             sampler=val_sampler,
                             num_workers=num_workers,
                             collate_fn=collate_fn,
-                            shuffle=False,
-                            drop_last=True,
+                            shuffle=shuffle,
+                            drop_last=drop_last,
+                            persistent_workers=persistent_workers,
+                            multiprocessing_context=multiprocessing_context,
                             pin_memory=pin_memory)
     if return_test:
         test_loader = DataLoader(dataset, batch_size=batch_size,
                                  sampler=test_sampler,
                                  num_workers=num_workers,
                                  collate_fn=collate_fn,
-                                 shuffle=False,
-                                 drop_last=True,
+                                 shuffle=shuffle,
+                                 drop_last=drop_last,
+                                 persistent_workers=persistent_workers,
+                                 multiprocessing_context=multiprocessing_context,
                                  pin_memory=pin_memory)
-    if return_test:
-        return train_loader, val_loader, test_loader
+    if classification:
+        if return_test:
+            return loss_weights, train_loader, val_loader, test_loader
+        else:
+            return loss_weights, train_loader, val_loader
     else:
-        return train_loader, val_loader
+        if return_test:
+            return train_loader, val_loader, test_loader
+        else:
+            return train_loader, val_loader
 
 
 def collate_pool(dataset_list):
