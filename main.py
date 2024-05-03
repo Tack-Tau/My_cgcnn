@@ -89,13 +89,13 @@ else:
 
 
 def main():
-    global args, best_mae_error
+    global args, best_mae_error, class_weights
 
     # load data
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
-    
-    loss_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
+
+    class_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         classification=True if args.task =='classification' else False,
         collate_fn=collate_fn,
@@ -109,7 +109,7 @@ def main():
         val_size=args.val_size,
         test_size=args.test_size,
         return_test=True)
-    
+
     # obtain target value normalizer
     if args.task == 'classification':
         normalizer = Normalizer(torch.zeros(2))
@@ -141,6 +141,7 @@ def main():
 
     # define loss func and optimizer
     if args.task == 'classification':
+        loss_weights = torch.tensor(class_weights, dtype=torch.float32)
         criterion = nn.NLLLoss(weight=loss_weights, reduction='mean')
     else:
         criterion = nn.MSELoss(reduction='mean')
@@ -469,10 +470,16 @@ def class_eval(prediction, target):
     if not target_label.shape:
         target_label = np.asarray([target_label])
     if prediction.shape[1] == 2:
+        class_weights_dict = {class_idx: weight for class_idx,
+                              weight in zip(np.unique(target_label), class_weights)}
+        sample_weight = [class_weights_dict[class_idx] for class_idx in target_label]
         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary', zero_division=np.nan)
-        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
-        accuracy = metrics.accuracy_score(target_label, pred_label)
+            target_label, pred_label, average='binary',
+            sample_weight=sample_weight, zero_division=np.nan)
+        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1],
+                                          average='macro', sample_weight=sample_weight)
+        accuracy = metrics.accuracy_score(target_label, pred_label,
+                                          sample_weight=sample_weight)
     else:
         raise NotImplementedError
     return accuracy, precision, recall, fscore, auc_score

@@ -132,9 +132,9 @@ def get_train_val_test_loader(dataset, classification=False,
                                  pin_memory=pin_memory)
     if classification:
         if return_test:
-            return loss_weights, train_loader, val_loader, test_loader
+            return class_weights, train_loader, val_loader, test_loader
         else:
-            return loss_weights, train_loader, val_loader
+            return class_weights, train_loader, val_loader
     else:
         if return_test:
             return None, train_loader, val_loader, test_loader
@@ -345,7 +345,7 @@ class CIFData(Dataset):
     cif_id: str or int
     """
     def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
+                 random_seed=42):
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
         assert os.path.exists(root_dir), 'root_dir does not exist!'
