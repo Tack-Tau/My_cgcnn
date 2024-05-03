@@ -6,7 +6,7 @@
 
 - Switch reading pymatgen structures from CIF to POSCAR
 - Add `shuffle` and `drop_last` in `torch.utils.data.DataLoader`
-- For imbalanced data add class_weight support both for Sampler and Loss function
+- Take data imbalance into account for classification job
 - TBD
 
 This software package implements the Crystal Graph Convolutional Neural Networks (CGCNN) that takes an arbitary crystal structure to predict material properties. 
