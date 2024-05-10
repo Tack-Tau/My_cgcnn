@@ -474,10 +474,13 @@ def class_eval(prediction, target):
                               weight in zip(np.unique(target_label), class_weights)}
         sample_weight = [class_weights_dict[class_idx] for class_idx in target_label]
         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
-            target_label, pred_label, average='binary',
+            target_label, pred_label, average='weighted',
             sample_weight=sample_weight, zero_division=np.nan)
-        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1],
-                                          average='macro', sample_weight=sample_weight)
+        try: # Handle "Only one class present in y_true" Error MSG
+            auc_score = metrics.roc_auc_score(target_label, prediction[:, 1],
+                                              average='weighted', sample_weight=sample_weight)
+        except ValueError:
+            auc_score = 0.0
         accuracy = metrics.accuracy_score(target_label, pred_label,
                                           sample_weight=sample_weight)
     else:
