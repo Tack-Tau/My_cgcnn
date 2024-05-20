@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import argparse
 import os
 import shutil
@@ -12,8 +15,10 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn import metrics
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import MultiStepLR
-from torch.multiprocessing import set_sharing_strategy
+from torch.nn.utils import clip_grad_norm_
+from torch.optim.lr_scheduler import MultiStepLR, ReduceLROnPlateau
+from torch.multiprocessing import set_sharing_strategy, get_context
+
 from cgcnn.data import CIFData
 from cgcnn.data import collate_pool, get_train_val_test_loader
 from cgcnn.model import CrystalGraphConvNet
@@ -29,12 +34,12 @@ parser.add_argument('--disable-cuda', action='store_true',
                     help='Disable CUDA')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
                     help='number of data loading workers (default: 0)')
-parser.add_argument('--epochs', default=30, type=int, metavar='N',
-                    help='number of total epochs to run (default: 30)')
+parser.add_argument('--epochs', default=200, type=int, metavar='N',
+                    help='number of total epochs to run (default: 200)')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
-                    metavar='N', help='mini-batch size (default: 256)')
+parser.add_argument('-b', '--batch-size', default=64, type=int,
+                    metavar='N', help='mini-batch size (default: 64)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate (default: '
                                        '0.01)')
@@ -81,6 +86,17 @@ parser.add_argument('--n-h', default=1, type=int, metavar='N',
 args = parser.parse_args(sys.argv[1:])
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
+args.mps = torch.backends.mps.is_available() and torch.backends.mps.is_built()
+
+if args.cuda:
+    device = torch.device("cuda")
+    torch.set_default_device(device)
+elif args.mps:
+    device = torch.device("mps")
+    torch.set_default_device(device)
+else:
+    device = torch.device("cpu")
+    torch.set_default_device(device)
 
 if args.task == 'regression':
     best_mae_error = 1e10
@@ -94,7 +110,6 @@ def main():
     # load data
     dataset = CIFData(*args.data_options)
     collate_fn = collate_pool
-
     class_weights, train_loader, val_loader, test_loader = get_train_val_test_loader(
         dataset=dataset,
         classification=True if args.task =='classification' else False,
@@ -108,6 +123,7 @@ def main():
         train_size=args.train_size,
         val_size=args.val_size,
         test_size=args.test_size,
+        multiprocessing_context=None if args.workers == 0 else get_context('fork'),
         return_test=True)
 
     # obtain target value normalizer
@@ -126,9 +142,9 @@ def main():
         normalizer = Normalizer(sample_target)
 
     # build model
-    structures, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]
-    nbr_fea_len = structures[1].shape[-1]
+    cifures, _, _ = dataset[0]
+    orig_atom_fea_len = cifures[0].shape[-1]
+    nbr_fea_len = cifures[1].shape[-1]
     model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
                                 atom_fea_len=args.atom_fea_len,
                                 n_conv=args.n_conv,
@@ -136,8 +152,16 @@ def main():
                                 n_h=args.n_h,
                                 classification=True if args.task ==
                                                        'classification' else False)
+
     if args.cuda:
-        model.cuda()
+        device = torch.device("cuda")
+        model.to(device)
+    elif args.mps:
+        device = torch.device("mps")
+        model.to(device)
+    else:
+        device = torch.device("cpu")
+        model.to(device)
 
     # define loss func and optimizer
     if args.task == 'classification':
@@ -170,21 +194,21 @@ def main():
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
-    scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones,
-                            gamma=0.1)
-
+    # scheduler = MultiStepLR(optimizer, milestones=args.lr_milestones, gamma=0.1)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1,
+                                  patience=20, threshold=0.01, threshold_mode='abs')
     for epoch in range(args.start_epoch, args.epochs):
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, normalizer)
 
         # evaluate on validation set
-        mae_error = validate(val_loader, model, criterion, normalizer)
+        val_loss, mae_error = validate(val_loader, model, criterion, normalizer)
 
         if mae_error != mae_error:
             print('Exit due to NaN')
             sys.exit(1)
 
-        scheduler.step()
+        scheduler.step(val_loss)
 
         # remember the best mae_eror and save checkpoint
         if args.task == 'regression':
@@ -231,10 +255,15 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         data_time.update(time.time() - end)
 
         if args.cuda:
-            input_var = (Variable(input[0].cuda(non_blocking=True)),
-                         Variable(input[1].cuda(non_blocking=True)),
-                         input[2].cuda(non_blocking=True),
-                         [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+            input_var = (Variable(input[0].to("cuda", non_blocking=True)),
+                         Variable(input[1].to("cuda", non_blocking=True)),
+                         input[2].to("cuda", non_blocking=True),
+                         [crys_idx.to("cuda", non_blocking=True) for crys_idx in input[3]])
+        elif args.mps:
+            input_var = (Variable(input[0].to("mps", non_blocking=False)),
+                         Variable(input[1].to("mps", non_blocking=False)),
+                         input[2].to("mps", non_blocking=False),
+                         [crys_idx.to("mps", non_blocking=True) for crys_idx in input[3]])
         else:
             input_var = (Variable(input[0]),
                          Variable(input[1]),
@@ -246,7 +275,9 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         else:
             target_normed = target.view(-1).long()
         if args.cuda:
-            target_var = Variable(target_normed.cuda(non_blocking=True))
+            target_var = Variable(target_normed.to("cuda", non_blocking=True))
+        elif args.mps:
+            target_var = Variable(target_normed.to("mps", non_blocking=False))
         else:
             target_var = Variable(target_normed)
 
@@ -272,6 +303,10 @@ def train(train_loader, model, criterion, optimizer, epoch, normalizer):
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
+
+        # Apply gradient clipping
+        clip_grad_norm_(model.parameters(), max_norm=1.0, norm_type=2.0)
+
         optimizer.step()
 
         # measure elapsed time
@@ -328,10 +363,16 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     for i, (input, target, batch_cif_ids) in enumerate(val_loader):
         if args.cuda:
             with torch.no_grad():
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+                input_var = (Variable(input[0].to("cuda", non_blocking=True)),
+                             Variable(input[1].to("cuda", non_blocking=True)),
+                             input[2].to("cuda", non_blocking=True),
+                             [crys_idx.to("cuda", non_blocking=True) for crys_idx in input[3]])
+        elif args.mps:
+            with torch.no_grad():
+                input_var = (Variable(input[0].to("mps", non_blocking=False)),
+                             Variable(input[1].to("mps", non_blocking=False)),
+                             input[2].to("mps", non_blocking=False),
+                             [crys_idx.to("mps", non_blocking=False) for crys_idx in input[3]])
         else:
             with torch.no_grad():
                 input_var = (Variable(input[0]),
@@ -344,7 +385,10 @@ def validate(val_loader, model, criterion, normalizer, test=False):
             target_normed = target.view(-1).long()
         if args.cuda:
             with torch.no_grad():
-                target_var = Variable(target_normed.cuda(non_blocking=True))
+                target_var = Variable(target_normed.to("cuda", non_blocking=True))
+        elif args.mps:
+            with torch.no_grad():
+                target_var = Variable(target_normed.to("mps", non_blocking=False))
         else:
             with torch.no_grad():
                 target_var = Variable(target_normed)
@@ -419,11 +463,11 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     if args.task == 'regression':
         print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
                                                         mae_errors=mae_errors))
-        return mae_errors.avg
+        return losses.avg, mae_errors.avg
     else:
         print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
                                                  auc=auc_scores))
-        return auc_scores.avg
+        return losses.avg, auc_scores.avg
 
 
 class Normalizer(object):

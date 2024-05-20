@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import argparse
 import os
 import shutil
@@ -17,9 +20,9 @@ from cgcnn.model import CrystalGraphConvNet
 
 parser = argparse.ArgumentParser(description='Crystal gated neural networks')
 parser.add_argument('modelpath', help='path to the trained model.')
-parser.add_argument('cifpath', help='path to the directory of CIF files.')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
-                    metavar='N', help='mini-batch size (default: 256)')
+parser.add_argument('cifpath', help='path to the directory of cifure files.')
+parser.add_argument('-b', '--batch-size', default=64, type=int,
+                    metavar='N', help='mini-batch size (default: 64)')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
                     help='number of data loading workers (default: 0)')
 parser.add_argument('--disable-cuda', action='store_true',
@@ -38,6 +41,7 @@ else:
     print("=> no model params found at '{}'".format(args.modelpath))
 
 args.cuda = not args.disable_cuda and torch.cuda.is_available()
+args.mps = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 
 if model_args.task == 'regression':
     best_mae_error = 1e10
@@ -56,9 +60,9 @@ def main():
                              pin_memory=args.cuda)
 
     # build model
-    structures, _, _ = dataset[0]
-    orig_atom_fea_len = structures[0].shape[-1]
-    nbr_fea_len = structures[1].shape[-1]
+    cifures, _, _ = dataset[0]
+    orig_atom_fea_len = cifures[0].shape[-1]
+    nbr_fea_len = cifures[1].shape[-1]
     model = CrystalGraphConvNet(orig_atom_fea_len, nbr_fea_len,
                                 atom_fea_len=model_args.atom_fea_len,
                                 n_conv=model_args.n_conv,
@@ -67,7 +71,14 @@ def main():
                                 classification=True if model_args.task ==
                                 'classification' else False)
     if args.cuda:
-        model.cuda()
+        device = torch.device("cuda")
+        model.to(device)
+    elif args.mps:
+        device = torch.device("mps")
+        model.to(device)
+    else:
+        device = torch.device("cpu")
+        model.to(device)
 
     # define loss func and optimizer
     if model_args.task == 'classification':
@@ -125,10 +136,15 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     for i, (input, target, batch_cif_ids) in enumerate(val_loader):
         with torch.no_grad():
             if args.cuda:
-                input_var = (Variable(input[0].cuda(non_blocking=True)),
-                             Variable(input[1].cuda(non_blocking=True)),
-                             input[2].cuda(non_blocking=True),
-                             [crys_idx.cuda(non_blocking=True) for crys_idx in input[3]])
+                input_var = (Variable(input[0].to("cuda", non_blocking=True)),
+                             Variable(input[1].to("cuda", non_blocking=True)),
+                             input[2].to("cuda", non_blocking=True),
+                             [crys_idx.to("cuda", non_blocking=True) for crys_idx in input[3]])
+            elif args.mps:
+                input_var = (Variable(input[0].to("mps", non_blocking=False)),
+                             Variable(input[1].to("mps", non_blocking=False)),
+                             input[2].to("mps", non_blocking=False),
+                             [crys_idx.to("mps", non_blocking=False) for crys_idx in input[3]])
             else:
                 input_var = (Variable(input[0]),
                              Variable(input[1]),
@@ -140,7 +156,9 @@ def validate(val_loader, model, criterion, normalizer, test=False):
             target_normed = target.view(-1).long()
         with torch.no_grad():
             if args.cuda:
-                target_var = Variable(target_normed.cuda(non_blocking=True))
+                target_var = Variable(target_normed.to("cuda", non_blocking=True))
+            elif args.mps:
+                target_var = Variable(target_normed.to("mps", non_blocking=False))
             else:
                 target_var = Variable(target_normed)
 
@@ -264,7 +282,6 @@ def class_eval(prediction, target):
     if prediction.shape[1] == 2:
         precision, recall, fscore, _ = metrics.precision_recall_fscore_support(
             target_label, pred_label, average='weighted')
-        auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
         try: # Handle "Only one class present in y_true" Error MSG
             auc_score = metrics.roc_auc_score(target_label, prediction[:, 1])
         except ValueError:
