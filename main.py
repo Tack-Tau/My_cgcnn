@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 import warnings
+from random import seed as rnd_seed
 from random import sample
 
 import numpy as np
@@ -567,4 +568,11 @@ def adjust_learning_rate(optimizer, epoch, k):
 
 if __name__ == '__main__':
     set_sharing_strategy('file_system')
+    
+    # For future reproducibility
+    seed = 42       # Your favorite seed, if all fail, try 3047 (https://arxiv.org/pdf/2109.08203)
+    np.random.seed(seed)
+    rnd_seed(seed)
+    torch.manual_seed(seed)
+    
     main()
